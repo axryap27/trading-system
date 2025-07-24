@@ -36,3 +36,48 @@ def run_backtest(hist1: pd.DataFrame, hist2: pd.DataFrame, symbol1: str = "ASSET
     Returns:
         Tuple of (signals_df, trades_list, metrics_dict)
     """
+
+
+def execute_trade(symbol: str, side: str, qty: int, price: float, timestamp: datetime,
+                 tracker: PositionTracker, trades_list: List[Dict], reason: str,
+                 transaction_cost: float, z_score: float, hedge_ratio: float, spread_position: int):
+    """
+    Execute a single trade and update tracking.
+    """
+    if qty <= 0:
+        return
+    
+    # Create synthetic execution report
+    execution_report = {
+        "order_id": str(uuid.uuid4()),
+        "symbol": symbol,
+        "side": side,
+        "filled_qty": qty,
+        "price": price,
+        "timestamp": timestamp,
+        "status": "filled"
+    }
+    
+    # Apply transaction costs
+    cost_adjustment = qty * price * transaction_cost
+    if side == "buy":
+        tracker.cash -= cost_adjustment  # Additional cost for buys
+    else:
+        tracker.cash -= cost_adjustment  # Cost reduces proceeds from sells
+    
+    # Update position tracker
+    tracker.update(execution_report)
+    
+    # Add to trades list with additional context
+    trades_list.append({
+        "timestamp": timestamp,
+        "symbol": symbol,
+        "side": side,
+        "quantity": qty,
+        "price": price,
+        "reason": reason,
+        "z_score": z_score,
+        "hedge_ratio": hedge_ratio,
+        "spread_position": spread_position,
+        "transaction_cost": cost_adjustment
+    })
