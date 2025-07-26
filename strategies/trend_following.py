@@ -90,3 +90,85 @@ def run_backtest(history: pd.DataFrame, short_win: int = 10, long_win: int = 50,
     book = LimitOrderBook(symbol)
     tracker = PositionTracker(starting_cash=starting_cash)
     trades_list = []
+    # Backtest loop - process each signal change
+    current_position = 0  # Track our current position
+    
+    for timestamp, row in df.iterrows():
+        if not row["signal_change"] or pd.isna(row["ma_short"]) or pd.isna(row["ma_long"]):
+            continue
+            
+        current_signal = row["signal"]
+        prev_signal = row["prev_signal"]
+        current_price = row["last_price"]
+        
+        # Determine trade action
+        trade_side = None
+        trade_qty = 0
+        
+        if current_signal == 1 and prev_signal == 0:
+            # Enter long position
+            trade_side = "buy"
+            # Calculate position size based on risk parameters
+            max_cash_risk = starting_cash * risk_params["position_pct"]
+            max_qty_by_cash = int(max_cash_risk / current_price)
+            max_qty_by_position = risk_params["max_position"]
+            trade_qty = min(max_qty_by_cash, max_qty_by_position)
+            
+        elif current_signal == 0 and prev_signal == 1:
+            # Exit long position
+            if current_position > 0:
+                trade_side = "sell"
+                trade_qty = current_position
+        
+        # Execute trade if needed
+        if trade_side and trade_qty > 0:
+            # Create order
+            order = Order(
+                id=str(uuid.uuid4()),
+                symbol=symbol,
+                side=trade_side,
+                quantity=trade_qty,
+                type="market",  # Use market orders for simplicity
+                timestamp=timestamp
+            )
+            
+            # Submit to OMS
+            try:
+                ack = oms.new_order(order)
+                
+                # Create synthetic execution (since we don't have real matching)
+                execution_report = {
+                    "order_id": order.id,
+                    "symbol": symbol,
+                    "side": trade_side,
+                    "filled_qty": trade_qty,
+                    "price": current_price,
+                    "timestamp": timestamp,
+                    "status": "filled"
+                }
+                
+                # Update position tracker
+                tracker.update(execution_report)
+                
+                # Add to trades list
+                trades_list.append({
+                    "timestamp": timestamp,
+                    "symbol": symbol,
+                    "side": trade_side,
+                    "quantity": trade_qty,
+                    "price": current_price,
+                    "signal": current_signal,
+                    "ma_short": row["ma_short"],
+                    "ma_long": row["ma_long"]
+                })
+                
+                # Update current position
+                if trade_side == "buy":
+                    current_position += trade_qty
+                else:
+                    current_position -= trade_qty
+                    
+            except Exception as e:
+                print(f"Trade execution failed at {timestamp}: {e}")
+    
+   
