@@ -36,6 +36,73 @@ def run_backtest(hist1: pd.DataFrame, hist2: pd.DataFrame, symbol1: str = "ASSET
         Tuple of (signals_df, trades_list, metrics_dict)
     """
 
+     # risk parameters
+    if risk_params is None:
+        risk_params = {
+            "max_position": 1000,    # max position per asset
+            "position_pct": 0.1,     # % of cash to risk per trade
+            "stop_loss": 3.0,        # Stop loss in Z-score units
+            "max_hold_days": 20,     # max days to hold position
+            "min_correlation": 0.7   # min correlation to trade
+        }
+    
+    # Align histories and ensure we have matching timestamps
+    df = pd.DataFrame({
+        "p1": hist1["last_price"],
+        "p2": hist2["last_price"]
+    }).dropna()
+    
+    if len(df) < lookback_window * 2:
+        raise ValueError(f"Insufficient data: need at least {lookback_window * 2} aligned points")
+    
+    # Calculate rolling statistics for hedge ratio and spread
+    results = []
+    
+    for i in range(lookback_window, len(df)):
+        # Get lookback window data
+        window_data = df.iloc[i-lookback_window:i]
+        current_data = df.iloc[i]
+        
+        # Calculate hedge ratio using linear regression
+        X = window_data["p2"].values.reshape(-1, 1)
+        y = window_data["p1"].values
+        
+        reg = LinearRegression().fit(X, y)
+        hedge_ratio = reg.coef_[0]
+        intercept = reg.intercept_
+        
+        # Calculate current spread
+        current_spread = current_data["p1"] - hedge_ratio * current_data["p2"]
+        
+        # Calculate spread statistics over lookback window
+        window_spreads = window_data["p1"] - hedge_ratio * window_data["p2"]
+        spread_mean = window_spreads.mean()
+        spread_std = window_spreads.std()
+        
+        # Calculate Z-score
+        z_score = (current_spread - spread_mean) / spread_std if spread_std > 0 else 0
+        
+        # Calculate correlation
+        correlation = window_data["p1"].corr(window_data["p2"])
+        
+        # Calculate R-squared of regression
+        from sklearn.metrics import r2_score
+        predicted = reg.predict(X)
+        r_squared = r2_score(y, predicted)
+        
+        results.append({
+            "timestamp": df.index[i],
+            "p1": current_data["p1"],
+            "p2": current_data["p2"],
+            "hedge_ratio": hedge_ratio,
+            "intercept": intercept,
+            "spread": current_spread,
+            "spread_mean": spread_mean,
+            "spread_std": spread_std,
+            "z_score": z_score,
+            "correlation": correlation,
+            "r_squared": r_squared
+        })
 
 def execute_trade(symbol: str, side: str, qty: int, price: float, timestamp: datetime,
                  tracker: PositionTracker, trades_list: List[Dict], reason: str,
