@@ -171,4 +171,63 @@ def run_backtest(history: pd.DataFrame, short_win: int = 10, long_win: int = 50,
             except Exception as e:
                 print(f"Trade execution failed at {timestamp}: {e}")
     
-   
+ # Calculate final metrics
+    final_price = df["last_price"].iloc[-1]
+    current_prices = {symbol: final_price}
+    
+    # Get performance summary
+    performance = tracker.get_performance_metrics(current_prices)
+    
+    # Calculate strategy-specific metrics
+    if len(trades_list) > 0:
+        trade_df = pd.DataFrame(trades_list)
+        
+        # Calculate trade-level returns
+        buy_trades = trade_df[trade_df["side"] == "buy"]
+        sell_trades = trade_df[trade_df["side"] == "sell"]
+        
+        # Match buy/sell pairs for trade analysis
+        trade_returns = []
+        if len(buy_trades) > 0 and len(sell_trades) > 0:
+            for _, sell_trade in sell_trades.iterrows():
+                # Find the most recent buy trade before this sell
+                prior_buys = buy_trades[buy_trades["timestamp"] < sell_trade["timestamp"]]
+                if len(prior_buys) > 0:
+                    buy_trade = prior_buys.iloc[-1]
+                    trade_return = (sell_trade["price"] - buy_trade["price"]) / buy_trade["price"]
+                    trade_returns.append(trade_return)
+        
+        # Win rate calculation
+        if trade_returns:
+            winning_trades = [r for r in trade_returns if r > 0]
+            win_rate = len(winning_trades) / len(trade_returns)
+            avg_win = np.mean(winning_trades) if winning_trades else 0
+            avg_loss = np.mean([r for r in trade_returns if r <= 0]) if any(r <= 0 for r in trade_returns) else 0
+        else:
+            win_rate = 0
+            avg_win = 0
+            avg_loss = 0
+    else:
+        win_rate = 0
+        avg_win = 0
+        avg_loss = 0
+    
+    # Compile metrics
+    metrics_dict = {
+        "strategy": "trend_following",
+        "total_return": performance["total_return"],
+        "total_pnl": performance["total_pnl"],
+        "max_drawdown": performance["max_drawdown"],
+        "sharpe_ratio": performance["sharpe_ratio"],
+        "win_rate": win_rate,
+        "avg_win": avg_win,
+        "avg_loss": avg_loss,
+        "total_trades": len(trades_list),
+        "final_position": current_position,
+        "final_cash": tracker.cash,
+        "short_window": short_win,
+        "long_window": long_win,
+        "starting_cash": starting_cash
+    }
+    
+    return signals_df, trades_list, metrics_dict
